@@ -128,7 +128,7 @@ async def fetch_weather() -> Weather:
     """Call OpenWeatherMap for Adama, return normalized Weather."""
     if not OWM_API_KEY:
         raise HTTPException(500, "OPENWEATHER_API_KEY not set")
-    url = "https://api.openweathermap.org/data/2.5/weather"
+    url = "https://openweathermap.org"
     params = {
         "lat": ADAMA_LAT,
         "lon": ADAMA_LON,
@@ -154,7 +154,7 @@ async def send_telegram(text: str) -> Optional[int]:
     """Post a message to the configured Telegram channel. Returns message_id."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
         return None
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    url = f"https://telegram.org{TELEGRAM_BOT_TOKEN}/sendMessage"
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(
             url,
@@ -223,30 +223,26 @@ async def trigger_loop(stop_event: asyncio.Event):
                     conn.execute(
                         "INSERT INTO campaign (ts, temp_c, condition, target_segment, message, telegram_message_id, status, recipients) "
                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        (w.ts, w.temp_c, w.condition, "all", message, msg_id, status, n),
+                        (w.ts, w.temp_c, w.condition, "regular,family,vip", message, msg_id, status, n),
                     )
         except Exception as e:
-            print(f"[scheduler] error: {e}")
-        try:
-            await asyncio.wait_for(stop_event.wait(), timeout=POLL_INTERVAL_SEC)
-        except asyncio.TimeoutError:
-            pass
+            print(f"[scheduler error] {e}")
+        await asyncio.sleep(POLL_INTERVAL_SEC)
 
 
-# ---------- App ----------
-stop_event = asyncio.Event()
-
-
+# ---------- Lifespan Config ----------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    stop_event = asyncio.Event()
     task = asyncio.create_task(trigger_loop(stop_event))
     yield
     stop_event.set()
     await task
 
 
-app = FastAPI(title="Haile Revenue OS", version="0.1.0", lifespan=lifespan)
+# ---------- FastAPI Server Initialization ----------
+app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -257,79 +253,29 @@ app.add_middleware(
 )
 
 
-@app.get("/api/v1/health")
-def health():
-    return {"status": "ok", "ts": datetime.now(EAT).isoformat()}
-
-
+# ---------- API Router Endpoints ----------
 @app.get("/api/v1/stats", response_model=Stats)
-def stats():
-    today_start = datetime.now(EAT).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+async def get_stats():
     with db() as conn:
-        last_weather = conn.execute(
-            "SELECT temp_c, condition, ts FROM weather_snapshot ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-        today_campaigns = conn.execute(
-            "SELECT COUNT(*) c, COALESCE(SUM(recipients), 0) m FROM campaign WHERE ts >= ?",
-            (today_start,),
-        ).fetchone()
+        w = conn.execute("SELECT * FROM weather_snapshot ORDER BY id DESC LIMIT 1").fetchone()
+        today = datetime.now(EAT).strftime("%Y-%m-%d")
+        c_today = conn.execute("SELECT COUNT(*) c FROM campaign WHERE ts LIKE ?", (f"{today}%",)).fetchone()["c"]
         total_leads = conn.execute("SELECT COUNT(*) c FROM lead").fetchone()["c"]
-    trigger_active = False
-    if last_weather and last_weather["temp_c"] is not None:
-        trigger_active = last_weather["temp_c"] >= TRIGGER_TEMP_C
+        
+    if not w:
+        return Stats(total_leads=total_leads)
+        
     return Stats(
-        temp_c=last_weather["temp_c"] if last_weather else None,
-        condition=last_weather["condition"] if last_weather else None,
-        last_check=last_weather["ts"] if last_weather else None,
-        campaigns_today=today_campaigns["c"],
-        messages_sent_today=today_campaigns["m"],
+        temp_c=w["temp_c"],
+        condition=w["condition"],
+        last_check=w["ts"],
+        campaigns_today=c_today,
+        messages_sent_today=c_today,
         total_leads=total_leads,
-        next_check_seconds=POLL_INTERVAL_SEC,
-        trigger_active=trigger_active,
+        trigger_active=(w["temp_c"] >= TRIGGER_TEMP_C)
     )
 
 
-@app.get("/api/v1/weather/current", response_model=Weather)
-async def weather_current():
-    return await fetch_weather()
-
-
-@app.get("/api/v1/campaigns", response_model=list[Campaign])
-def list_campaigns(limit: int = 50):
+@app.get("/api/v1/campaigns")
+async def get_campaigns():
     with db() as conn:
-        rows = conn.execute(
-            "SELECT * FROM campaign ORDER BY id DESC LIMIT ?", (limit,)
-        ).fetchall()
-    return [dict(r) for r in rows]
-
-
-@app.post("/api/v1/campaigns/test")
-async def test_campaign():
-    """Manually trigger a campaign right now (for the demo)."""
-    w = await fetch_weather()
-    message = make_message(w)
-    msg_id = await send_telegram(message)
-    with db() as conn:
-        n = conn.execute(
-            "SELECT COUNT(*) c FROM lead WHERE tier IN ('regular', 'family', 'vip')"
-        ).fetchone()["c"]
-        status = "sent" if msg_id else "queued"
-        conn.execute(
-            "INSERT INTO campaign (ts, temp_c, condition, target_segment, message, telegram_message_id, status, recipients) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (w.ts, w.temp_c, w.condition, "manual", message, msg_id, status, n),
-        )
-    return {"ok": True, "temp_c": w.temp_c, "message_id": msg_id, "recipients": n}
-
-
-@app.get("/api/v1/leads")
-def list_leads(limit: int = 100):
-    with db() as conn:
-        rows = conn.execute("SELECT * FROM lead ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
-    return [dict(r) for r in rows]
-
-
-if __name__ == "__main__":
-    import uvicorn
-    port = int(os.getenv("PORT", "8000"))
-    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
