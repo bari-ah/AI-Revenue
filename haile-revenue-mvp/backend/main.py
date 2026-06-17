@@ -278,4 +278,23 @@ async def get_stats():
 
 @app.get("/api/v1/campaigns")
 async def get_campaigns():
-    with db() as conn:
+    with db() as conn
+            rows = conn.execute("SELECT * FROM campaign ORDER BY id DESC LIMIT 20").fetchall()
+             return [dict(r) for r in rows]
+@app.post("/api/v1/campaigns/test")
+async def trigger_test_campaign():
+    try:
+        w = await fetch_weather()
+        message = make_message(w)
+        msg_id = await send_telegram(message)
+        
+        with db() as conn:
+            n = conn.execute("SELECT COUNT(*) c FROM lead").fetchone()["c"]
+            conn.execute(
+                "INSERT INTO campaign (ts, temp_c, condition, target_segment, message, telegram_message_id, status, recipients) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (w.ts, w.temp_c, w.condition, "all-test", message, msg_id, "sent" if msg_id else "failed", n)
+            )
+        return {"status": "success", "telegram_message_id": msg_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
