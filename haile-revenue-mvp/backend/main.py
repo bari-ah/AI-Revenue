@@ -128,7 +128,7 @@ async def fetch_weather() -> Weather:
     """Call OpenWeatherMap for Adama, return normalized Weather."""
     if not OWM_API_KEY:
         raise HTTPException(500, "OPENWEATHER_API_KEY not set")
-    url = "https://openweathermap.org"
+    url = "https://api.openweathermap.org/data/2.5/weather"
     params = {
         "lat": ADAMA_LAT,
         "lon": ADAMA_LON,
@@ -154,7 +154,7 @@ async def send_telegram(text: str) -> Optional[int]:
     """Post a message to the configured Telegram channel. Returns message_id."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
         return None
-    url = f"https://telegram.org{TELEGRAM_BOT_TOKEN}/sendMessage"
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     async with httpx.AsyncClient(timeout=10) as client:
         r = await client.post(
             url,
@@ -278,9 +278,11 @@ async def get_stats():
 
 @app.get("/api/v1/campaigns")
 async def get_campaigns():
-    with db() as conn
-            rows = conn.execute("SELECT * FROM campaign ORDER BY id DESC LIMIT 20").fetchall()
-             return [dict(r) for r in rows]
+    with db() as conn:
+        rows = conn.execute("SELECT * FROM campaign ORDER BY id DESC LIMIT 20").fetchall()
+        return [dict(r) for r in rows]
+
+
 @app.post("/api/v1/campaigns/test")
 async def trigger_test_campaign():
     try:
@@ -295,6 +297,6 @@ async def trigger_test_campaign():
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (w.ts, w.temp_c, w.condition, "all-test", message, msg_id, "sent" if msg_id else "failed", n)
             )
-        return {"status": "success", "telegram_message_id": msg_id}
+        return {"status": "success", "telegram_message_id": msg_id, "temp_c": w.temp_c, "recipients": n}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
