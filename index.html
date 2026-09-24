@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="AI-driven revenue optimization dashboard for hospitality businesses." />
+  <title>AI Revenue Optimization OS</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink: '#0b1220',
+            brand: '#6d5dfc',
+            cyan: '#22d3ee'
+          },
+          boxShadow: {
+            glow: '0 20px 80px rgba(109, 93, 252, .24)'
+          }
+        }
+      }
+    };
+  </script>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 antialiased">
+  <div class="pointer-events-none fixed inset-0 overflow-hidden" aria-hidden="true">
+    <div class="absolute -left-24 -top-24 h-96 w-96 rounded-full bg-brand/20 blur-3xl"></div>
+    <div class="absolute -right-24 top-1/3 h-96 w-96 rounded-full bg-cyan/10 blur-3xl"></div>
+  </div>
+
+  <main class="relative mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+    <header class="mb-12 flex flex-col gap-6 sm:flex-row sm:items-center sm:justify-between">
+      <div class="flex items-center gap-3">
+        <div class="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-brand to-cyan font-black shadow-glow">AI</div>
+        <div>
+          <p class="text-sm font-semibold text-cyan-300">Revenue intelligence platform</p>
+          <p class="text-xs text-slate-400">Operational dashboard</p>
+        </div>
+      </div>
+      <div id="connectionStatus" class="inline-flex items-center gap-2 self-start rounded-full border border-slate-700 bg-slate-900/70 px-3 py-2 text-xs text-slate-300 sm:self-auto">
+        <span class="h-2 w-2 rounded-full bg-slate-500"></span>
+        Not connected
+      </div>
+    </header>
+
+    <section class="mb-12 max-w-4xl">
+      <p class="mb-4 text-sm font-semibold uppercase tracking-[0.25em] text-brand-300">AI Revenue OS</p>
+      <h1 class="text-4xl font-black tracking-tight sm:text-6xl">AI-Driven Revenue Optimization OS</h1>
+      <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">Turn business context and live market conditions into clear revenue actions, campaign decisions, and measurable operating signals.</p>
+    </section>
+
+    <section class="grid gap-6 lg:grid-cols-[minmax(0,420px)_1fr]">
+      <form id="analysisForm" class="rounded-3xl border border-slate-800 bg-slate-900/80 p-6 shadow-2xl backdrop-blur sm:p-8">
+        <div class="mb-7">
+          <h2 class="text-xl font-bold">Run an analysis</h2>
+          <p class="mt-1 text-sm text-slate-400">Provide the operating context for your revenue engine.</p>
+        </div>
+
+        <div class="space-y-5">
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Business type</span>
+            <input id="businessType" name="businessType" required value="Hospitality / Resort" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none transition placeholder:text-slate-600 focus:border-brand focus:ring-2 focus:ring-brand/30" />
+          </label>
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Location</span>
+            <input id="location" name="location" required value="Adama, Ethiopia" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none transition placeholder:text-slate-600 focus:border-brand focus:ring-2 focus:ring-brand/30" />
+          </label>
+          <div class="grid grid-cols-2 gap-4">
+            <label class="block">
+              <span class="mb-2 block text-sm font-medium text-slate-300">Temperature (°C)</span>
+              <input id="temperature" name="temperature_c" type="number" step="0.1" min="-80" max="80" required value="28" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-brand focus:ring-2 focus:ring-brand/30" />
+            </label>
+            <label class="block">
+              <span class="mb-2 block text-sm font-medium text-slate-300">Humidity (%)</span>
+              <input id="humidity" name="humidity" type="number" min="0" max="100" value="55" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-brand focus:ring-2 focus:ring-brand/30" />
+            </label>
+          </div>
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Business objective</span>
+            <select id="objective" name="objective" class="w-full rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-brand focus:ring-2 focus:ring-brand/30">
+              <option value="increase_occupancy">Increase occupancy</option>
+              <option value="increase_revenue">Increase revenue per customer</option>
+              <option value="clear_capacity">Clear unused capacity</option>
+              <option value="retain_customers">Retain customers</option>
+            </select>
+          </label>
+          <label class="block">
+            <span class="mb-2 block text-sm font-medium text-slate-300">Additional context</span>
+            <textarea id="context" name="context" rows="3" placeholder="Current offer, capacity, audience, or constraints" class="w-full resize-none rounded-xl border border-slate-700 bg-slate-950 px-4 py-3 outline-none focus:border-brand focus:ring-2 focus:ring-brand/30"></textarea>
+          </label>
+        </div>
+
+        <button id="submitButton" type="submit" class="mt-7 flex w-full items-center justify-center gap-3 rounded-xl bg-gradient-to-r from-brand to-indigo-500 px-5 py-3.5 font-semibold shadow-lg shadow-brand/20 transition hover:from-indigo-500 hover:to-brand focus:outline-none focus:ring-2 focus:ring-cyan-300 disabled:cursor-not-allowed disabled:opacity-60">
+          <span id="buttonSpinner" class="hidden h-5 w-5 animate-spin rounded-full border-2 border-white/30 border-t-white"></span>
+          <span id="buttonText">Generate revenue analysis</span>
+        </button>
+        <p class="mt-3 text-center text-xs text-slate-500">Requests are sent securely to your configured backend.</p>
+      </form>
+
+      <section id="resultsPanel" aria-live="polite" class="min-h-[520px] rounded-3xl border border-slate-800 bg-slate-900/50 p-6 sm:p-8">
+        <div id="emptyState" class="grid min-h-[460px] place-items-center text-center">
+          <div class="max-w-sm">
+            <div class="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-2xl bg-brand/15 text-3xl">✦</div>
+            <h2 class="text-2xl font-bold">Your analysis will appear here</h2>
+            <p class="mt-3 text-slate-400">Submit your operating data to receive a live campaign result and performance snapshot.</p>
+          </div>
+        </div>
+        <div id="resultsContent" class="hidden"></div>
+      </section>
+    </section>
+
+    <footer class="mt-12 border-t border-slate-800 pt-6 text-sm text-slate-500">AI Revenue Optimization OS · Built for measurable growth</footer>
+  </main>
+  <script src="./script.js" defer></script>
+</body>
+</html>
