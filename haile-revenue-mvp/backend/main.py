@@ -3,19 +3,25 @@ Haile Revenue OS — backend MVP
 Polls Adama weather every 5 min, broadcasts to Telegram when temp >= 28°C.
 """
 import asyncio
+import logging
 import os
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from pathlib import Path
+from typing import Any, Optional
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 load_dotenv()
+
+logger = logging.getLogger("haile_revenue")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 # ---------- Config ----------
 OWM_API_KEY = os.getenv("OPENWEATHER_API_KEY", "")
@@ -33,7 +39,10 @@ EAT = timezone(timedelta(hours=3))
 
 # ---------- DB ----------
 def db():
-    conn = sqlite3.connect(DB_PATH)
+    """Create a SQLite connection with parent directories ensured and robust error handling."""
+    db_file = Path(DB_PATH).expanduser().resolve()
+    db_file.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_file))
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -135,33 +144,51 @@ async def fetch_weather() -> Weather:
         "appid": OWM_API_KEY,
         "units": "metric",
     }
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(url, params=params)
-        r.raise_for_status()
-        p = r.json()
-    return Weather(
-        temp_c=p["main"]["temp"],
-        feels_like_c=p["main"].get("feels_like"),
-        condition=p["weather"][0]["main"] if p.get("weather") else "Unknown",
-        description=p["weather"][0]["description"] if p.get("weather") else "",
-        humidity=p["main"].get("humidity"),
-        ts=datetime.now(EAT).isoformat(),
-    )
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.get(url, params=params)
+            r.raise_for_status()
+            payload = r.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"Weather API request failed: {exc}") from exc
+
+    try:
+        return Weather(
+            temp_c=payload["main"]["temp"],
+            feels_like_c=payload["main"].get("feels_like"),
+            condition=payload["weather"][0]["main"] if payload.get("weather") else "Unknown",
+            description=payload["weather"][0]["description"] if payload.get("weather") else "",
+            humidity=payload["main"].get("humidity"),
+            ts=datetime.now(EAT).isoformat(),
+        )
+    except (KeyError, IndexError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=502, detail=f"Weather API payload malformed: {exc}") from exc
 
 
 # ---------- Telegram ----------
 async def send_telegram(text: str) -> Optional[int]:
     """Post a message to the configured Telegram channel. Returns message_id."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHANNEL_ID:
+        logger.warning("Telegram is not configured; skipping message send.")
         return None
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(
-            url,
-            json={"chat_id": TELEGRAM_CHANNEL_ID, "text": text, "parse_mode": "HTML"},
-        )
-    if r.status_code == 200:
-        return r.json().get("result", {}).get("message_id")
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.post(
+                url,
+                json={"chat_id": TELEGRAM_CHANNEL_ID, "text": text, "parse_mode": "HTML"},
+            )
+            response.raise_for_status()
+            payload = response.json()
+    except (httpx.HTTPError, ValueError) as exc:
+        logger.warning("Telegram send failed: %s", exc)
+        return None
+
+    try:
+        if payload.get("ok") is True:
+            return payload.get("result", {}).get("message_id")
+    except (AttributeError, TypeError, ValueError) as exc:
+        logger.warning("Telegram payload malformed: %s", exc)
     return None
 
 
@@ -225,8 +252,8 @@ async def trigger_loop(stop_event: asyncio.Event):
                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         (w.ts, w.temp_c, w.condition, "regular,family,vip", message, msg_id, status, n),
                     )
-        except Exception as e:
-            print(f"[scheduler error] {e}")
+        except Exception as exc:
+            logger.exception("Scheduler loop error: %s", exc)
         await asyncio.sleep(POLL_INTERVAL_SEC)
 
 
@@ -253,18 +280,37 @@ app.add_middleware(
 )
 
 
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception for %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
+
+
 # ---------- API Router Endpoints ----------
+@app.get("/health")
+async def healthcheck():
+    return {"status": "ok", "timestamp": datetime.now(EAT).isoformat()}
+
+
 @app.get("/api/v1/stats", response_model=Stats)
 async def get_stats():
     with db() as conn:
         w = conn.execute("SELECT * FROM weather_snapshot ORDER BY id DESC LIMIT 1").fetchone()
         today = datetime.now(EAT).strftime("%Y-%m-%d")
-        c_today = conn.execute("SELECT COUNT(*) c FROM campaign WHERE ts LIKE ?", (f"{today}%",)).fetchone()["c"]
+        c_today = conn.execute(
+            "SELECT COUNT(*) c FROM campaign WHERE ts LIKE ? AND status = 'sent'",
+            (f"{today}%",),
+        ).fetchone()["c"]
         total_leads = conn.execute("SELECT COUNT(*) c FROM lead").fetchone()["c"]
-        
+
     if not w:
-        return Stats(total_leads=total_leads)
-        
+        return Stats(total_leads=total_leads, messages_sent_today=c_today)
+
     return Stats(
         temp_c=w["temp_c"],
         condition=w["condition"],
@@ -272,7 +318,7 @@ async def get_stats():
         campaigns_today=c_today,
         messages_sent_today=c_today,
         total_leads=total_leads,
-        trigger_active=(w["temp_c"] >= TRIGGER_TEMP_C)
+        trigger_active=(w["temp_c"] >= TRIGGER_TEMP_C),
     )
 
 
@@ -289,14 +335,33 @@ async def trigger_test_campaign():
         w = await fetch_weather()
         message = make_message(w)
         msg_id = await send_telegram(message)
-        
+
         with db() as conn:
             n = conn.execute("SELECT COUNT(*) c FROM lead").fetchone()["c"]
             conn.execute(
                 "INSERT INTO campaign (ts, temp_c, condition, target_segment, message, telegram_message_id, status, recipients) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (w.ts, w.temp_c, w.condition, "all-test", message, msg_id, "sent" if msg_id else "failed", n)
+                (w.ts, w.temp_c, w.condition, "all-test", message, msg_id, "sent" if msg_id else "failed", n),
             )
-        return {"status": "success", "telegram_message_id": msg_id, "temp_c": w.temp_c, "recipients": n}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "ok": True,
+            "status": "sent" if msg_id else "failed",
+            "temp_c": w.temp_c,
+            "message_id": msg_id,
+            "telegram_message_id": msg_id,
+            "recipients": n,
+        }
+    except Exception as exc:
+        logger.exception("Test campaign failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run(
+        "main:app",
+        host=os.getenv("HOST", "0.0.0.0"),
+        port=int(os.getenv("PORT", "8000")),
+        reload=False,
+    )
