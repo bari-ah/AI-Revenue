@@ -1,0 +1,27 @@
+{
+  "buildCommand": "echo 'Frontend build complete'",
+  "outputDirectory": ".",
+  "framework": "vanilla",
+  "regions": ["iad1"],
+  "env": {
+    "BACKEND_API_URL": {
+      "description": "Backend API URL for AI analysis",
+      "default": "https://your-backend-api.com"
+    }
+  },
+  "headers": [
+    {
+      "source": "/index.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=3600, must-revalidate"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
+      ]
+    }
+  ]
+}
